@@ -109,6 +109,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         RunLoop.main.add(overviewTimer, forMode: .common)
         observeDock()
 
+        // Play/Pause-Taste der Tastatur mitbekommen (Medientasten kommen als „systemDefined“-Ereignis)
+        mediaKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined) { [weak self] event in
+            guard event.subtype.rawValue == 8 else { return }
+            let key = (event.data1 & 0xFFFF0000) >> 16
+            let down = (event.data1 & 0xFF00) >> 8 == 0xA
+            if key == 16, down, event.data1 & 0x1 == 0 { self?.ui.music.mediaKeyPlayPause() } // 16 = Play/Pause, ohne Wiederholung
+        }
+
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.place() }
@@ -195,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Das Panel ist größer als die Insel. Damit die Menüleiste klickbar bleibt, lässt es Klicks
     /// nur innerhalb der Insel zu – und öffnet/schließt sie beim Hovern.
+    private var mediaKeyMonitor: Any?
     private var overviewOpen = false
     private var dockObserver: AXObserver?
 

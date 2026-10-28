@@ -128,6 +128,23 @@ final class MusicModel: ObservableObject {
         command("set player position to \(String(format: "%.2f", fraction * duration))", player)
     }
 
+    /// Die Play/Pause-Taste der Tastatur wurde gedrückt (siehe AppDelegate). Bei eSound sofort umschalten –
+    /// die Datei verrät eine Pause per Taste sonst erst nach ~1,5 s.
+    func mediaKeyPlayPause() {
+        guard player == .esound else { return }
+        toggleOptimistically()
+        log("Medientaste: \(playing ? "Play" : "Pause")")
+    }
+
+    /// Sofort umschalten und die Zeit anhalten bzw. weiterlaufen lassen, bis eSound die Datei nachzieht.
+    private func toggleOptimistically() {
+        let now = Date()
+        esOverride = (!playing, position(at: now), now)
+        position = esOverride!.position
+        polledAt = now
+        playing.toggle()
+    }
+
     func openPlayer() { openApp(bundleID: (player ?? .music).bundleID) }
 
     private func command(_ cmd: String, _ p: Player) {
@@ -139,13 +156,7 @@ final class MusicModel: ObservableObject {
                 "previous track": (.previous, MediaKeys.previous),
             ]
             if let (menu, key) = commands[cmd], !esound.press(menu) { MediaKeys.post(key) }
-            if cmd == "playpause" {
-                // Sofort umschalten statt auf die Datei zu warten
-                let now = Date()
-                esOverride = (!playing, position(at: now), now)
-                position = esOverride!.position; polledAt = now; playing.toggle()
-                return
-            }
+            if cmd == "playpause" { toggleOptimistically(); return }
         } else {
             Self.run("tell application \"\(p.rawValue)\" to \(cmd)")
         }
