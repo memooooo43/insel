@@ -175,10 +175,15 @@ final class MusicModel: ObservableObject {
         if title != s.title { title = s.title }
         if artist != s.artist { artist = s.artist }
         if duration != s.duration { duration = s.duration }
-        position = s.position
-        polledAt = Date()
-
         let key = "\(p.rawValue)|\(s.title)|\(s.artist)"
+        // Eigene Uhr gleichmäßig weiterlaufen lassen und nur bei echter Abweichung (Spulen, Hänger)
+        // neu stellen – die gelesene Position schwankt um ein paar Zehntel, das ließ die Lyrics an
+        // Zeilengrenzen vor- und zurückspringen.
+        let now = Date()
+        if !(s.playing && key == trackKey && abs(s.position - position(at: now)) < 0.6) {
+            position = s.position
+            polledAt = now
+        }
         if key != trackKey {
             let wasPlaying = !trackKey.isEmpty
             trackKey = key

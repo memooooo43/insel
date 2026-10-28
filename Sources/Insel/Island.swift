@@ -527,20 +527,22 @@ struct LyricsScroller: View {
     static let lineHeight: CGFloat = 21
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(lines.indices, id: \.self) { i in
+        // Nur die Zeilen rund um die aktuelle zeichnen (statt aller 60+), jede an ihrer Stelle
+        let visible = max(index - 1, 0)...max(min(index + 3, lines.count - 1), 0)
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(visible), id: \.self) { i in
                 let active = i == index
                 Text(lines[i].text)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                     .foregroundStyle(active ? accent : .white.opacity(i < index ? 0.2 : 0.42))
                     .scaleEffect(active ? 1 : 0.84, anchor: .leading)
-                    .blur(radius: abs(i - index) > 1 ? 1.2 : 0)
-                    .frame(height: Self.lineHeight, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: Self.lineHeight, maxHeight: Self.lineHeight, alignment: .leading)
+                    // Aktive Zeile steht oben, die nächste darunter
+                    .offset(y: CGFloat(i - index) * Self.lineHeight)
+                    .transition(.opacity)
             }
         }
-        // Aktive Zeile steht oben, die nächste darunter
-        .offset(y: -CGFloat(index) * Self.lineHeight)
         .animation(.spring(response: 0.55, dampingFraction: 0.86), value: index)
         .frame(maxWidth: .infinity, maxHeight: Self.lineHeight * 2, alignment: .topLeading)
         .clipped()
