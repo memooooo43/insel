@@ -94,8 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.ignoresMouseEvents = true
         panel.acceptsMouseMovedEvents = true
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
-        // .transient: in Mission Control/Exposé ausblenden, damit die Insel die Schreibtisch-Leiste nicht verdeckt
-        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
+        // .stationary: Mission Control fasst die Insel nicht an (mit .transient schob es sie erst
+        // sichtbar zur Seite). Ausgeblendet wird sie dort selbst, siehe setOverview.
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.contentView = NSHostingView(rootView: IslandView(ui: ui))
         place()
         panel.orderFrontRegardless()
@@ -104,8 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // kommen Mausbewegungen sonst nicht zuverlässig an.
         let timer = Timer(timeInterval: 0.04, repeats: true) { [weak self] _ in self?.track() }
         RunLoop.main.add(timer, forMode: .common)
-        let overviewTimer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in self?.checkOverview() }
+        let overviewTimer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.checkOverview() }
         RunLoop.main.add(overviewTimer, forMode: .common)
+        observeDock()
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -194,9 +196,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Das Panel ist größer als die Insel. Damit die Menüleiste klickbar bleibt, lässt es Klicks
     /// nur innerhalb der Insel zu – und öffnet/schließt sie beim Hovern.
     private var overviewOpen = false
+    private var dockObserver: AXObserver?
+
+    /// Das Dock meldet über die Bedienungshilfen, wenn Mission Control/App-Übersicht startet und endet –
+    /// darauf sofort reagieren. checkOverview() fängt den Rest ab (z. B. ohne Freigabe).
+    private func observeDock() {
+        guard AXIsProcessTrusted(),
+              let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return }
+        var observer: AXObserver?
+        let callback: AXObserverCallback = { _, _, notification, refcon in
+            guard let refcon else { return }
+            let me = Unmanaged<AppDelegate>.fromOpaque(refcon).takeUnretainedValue()
+            me.setOverview(open: (notification as String) != "AXExposeExit", via: notification as String)
+        }
+        guard AXObserverCreate(dock.processIdentifier, callback, &observer) == .success, let observer else { return }
+        let element = AXUIElementCreateApplication(dock.processIdentifier)
+        let me = Unmanaged.passUnretained(self).toOpaque()
+        for name in ["AXExposeShowAllWindows", "AXExposeShowFrontWindows", "AXExposeShowDesktop", "AXExposeExit"] {
+            AXObserverAddNotification(observer, element, name as CFString, me)
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+        dockObserver = observer
+    }
 
     /// Mission Control, App-Übersicht und Launchpad zeichnet das Dock als bildschirmfüllendes Fenster.
-    /// Solange das offen ist, blendet sich die Insel aus – sonst verdeckt sie die Schreibtisch-Leiste.
     private func checkOverview() {
         let f = screen.frame
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -205,17 +228,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
             return (b["Width"] ?? 0) >= f.width && (b["Height"] ?? 0) >= f.height
         }
+        // Öffnen meldet das Dock sofort; das Schließen hier nur übernehmen, wenn die Meldung fehlte
+        if open != overviewOpen { setOverview(open: open, via: "Fensterprüfung") }
+    }
+
+    /// Solange eine Übersicht offen ist, ist die Insel weg – sonst verdeckt sie die Schreibtisch-Leiste.
+    private func setOverview(open: Bool, via source: String) {
         guard open != overviewOpen else { return }
         overviewOpen = open
         if open {
+            // Sofort weg, ohne Animation
             expandWork?.cancel(); expandWork = nil
+            collapseWork?.cancel(); collapseWork = nil
             ui.expanded = false
             panel.ignoresMouseEvents = true
+            panel.alphaValue = 0
+        } else {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.25
+                panel.animator().alphaValue = 1
+            }
         }
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
-            panel.animator().alphaValue = open ? 0 : 1
-        }
+        log("Übersicht \(open ? "geöffnet" : "geschlossen") (\(source))")
     }
 
     private func track() {
