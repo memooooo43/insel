@@ -58,7 +58,7 @@ Beim ersten Benutzen fragt macOS nach:
 | AirPods | `system_profiler SPBluetoothDataType` |
 | Lyrics | eSound bzw. LRCLIB |
 
-Bekannte Grenzen: Bei eSound lässt sich nur in 15-Sekunden-Schritten spulen, und eine Pause wird nach etwa 1,5 Sekunden erkannt.
+Bekannte Grenzen: Bei eSound lässt sich nur in 15-Sekunden-Schritten spulen; eine Pause per Medientaste wird erst nach etwa 1,5 Sekunden erkannt (sonst sofort).
 
 ## Aufbau
 

@@ -71,7 +71,7 @@ final class MusicModel: ObservableObject {
     init() {
         guard !demoMode else { return }
         poll()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
     }
 
     var isActive: Bool { player != nil && playing && Settings.shared.showMusic }
@@ -290,8 +290,11 @@ final class MusicModel: ObservableObject {
         let written = (try? FileManager.default.attributesOfItem(atPath: Self.esoundFile.path))?[.modificationDate] as? Date ?? .distantPast
         let elapsed = number(d["elapsedTime"]) ?? 0
 
-        // Datei frisch geschrieben = spielt
-        var playing = now.timeIntervalSince(written) < 1.5
+        // Pausiert, wenn eSound es meldet (schreibt beim Pausieren sofort userPaused: true) oder
+        // die Datei länger nicht geschrieben hat – beim Abspielen schreibt eSound jede Sekunde.
+        // (Pausieren per Medientaste setzt userPaused nicht, daher beides.)
+        let fileFresh = now.timeIntervalSince(written) < 1.5
+        var playing = fileFresh && bool(d["userPaused"]) != true
         var position = playing ? elapsed + now.timeIntervalSince(written) : elapsed
 
         if let o = esOverride {
