@@ -130,6 +130,14 @@ final class MusicModel: ObservableObject {
         command("set player position to \(String(format: "%.2f", fraction * duration))", player)
     }
 
+    /// Die Play/Pause-Taste der Tastatur wurde gedrückt (siehe AppDelegate.listenForMediaKeys).
+    /// Bei eSound sofort umschalten; die Datei bestätigt es danach.
+    func mediaKeyPlayPause() {
+        log("Medientaste gedrückt (Player: \(player?.rawValue ?? "keiner"))")
+        guard player == .esound else { return }
+        toggleOptimistically()
+    }
+
     /// Sofort umschalten und die Zeit anhalten bzw. weiterlaufen lassen, bis eSound die Datei nachzieht.
     private func toggleOptimistically() {
         let now = Date()

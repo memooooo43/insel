@@ -68,7 +68,7 @@ final class IslandUI: ObservableObject {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let ui = IslandUI()
+    fileprivate let ui = IslandUI()
     private var panel: IslandPanel!
     private var expandWork: DispatchWorkItem?
     private var collapseWork: DispatchWorkItem?
@@ -108,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let overviewTimer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.checkOverview() }
         RunLoop.main.add(overviewTimer, forMode: .common)
         observeDock()
+        listenForMediaKeys()
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -195,6 +196,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Das Panel ist größer als die Insel. Damit die Menüleiste klickbar bleibt, lässt es Klicks
     /// nur innerhalb der Insel zu – und öffnet/schließt sie beim Hovern.
+    private var mediaKeyTap: CFMachPort?
+
+    /// Liest die Play/Pause-Taste der Tastatur mit (lässt sie unverändert durch). eSound verrät eine Pause
+    /// per Taste in seiner Datei erst ~1,3 s später – mit der Taste schaltet die Insel sofort um.
+    /// (NSEvent-Monitore bekommen Medientasten nicht; ein Ereignis-Abgriff schon, braucht aber die
+    /// Bedienungshilfen-Freigabe.)
+    private func listenForMediaKeys() {
+        let systemDefined = CGEventMask(1 << 14) // NX_SYSDEFINED: Medientasten
+        let callback: CGEventTapCallBack = { _, type, event, refcon in
+            guard let refcon else { return Unmanaged.passUnretained(event) }
+            let me = Unmanaged<AppDelegate>.fromOpaque(refcon).takeUnretainedValue()
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let tap = me.mediaKeyTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            } else if type.rawValue == 14, let e = NSEvent(cgEvent: event), e.subtype.rawValue == 8 {
+                let key = (e.data1 & 0xFFFF0000) >> 16
+                let down = (e.data1 & 0xFF00) >> 8 == 0xA
+                let isRepeat = e.data1 & 0x1 == 1
+                if key == 16, down, !isRepeat { // 16 = Play/Pause
+                    DispatchQueue.main.async { me.ui.music.mediaKeyPlayPause() }
+                }
+            }
+            return Unmanaged.passUnretained(event)
+        }
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                                          eventsOfInterest: systemDefined, callback: callback,
+                                          userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
+            log("Medientasten: kein Zugriff (Bedienungshilfen-Freigabe fehlt?)")
+            return
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        mediaKeyTap = tap
+        log("Medientasten: Abgriff aktiv")
+    }
+
     private var overviewOpen = false
     private var dockObserver: AXObserver?
 
