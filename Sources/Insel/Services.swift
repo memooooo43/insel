@@ -59,6 +59,9 @@ final class MusicModel: ObservableObject {
     private let esound = ESoundBridge()
     /// Nach einem Klick in der Insel gilt kurz unser Wert, bis eSound die Datei nachgezogen hat.
     private var esOverride: (playing: Bool, position: Double, at: Date)?
+    private var tick = 0
+    /// Letzter Stand von Apple Music/Spotify (werden seltener abgefragt)
+    private var scriptStates: [(Player, State)] = []
     private var trackKey = ""
     /// Lyrics, die beim Songwechsel noch in der eSound-Datei stehen, gehören zum vorherigen Song.
     private var staleLyricsSig: String?
@@ -161,9 +164,20 @@ final class MusicModel: ObservableObject {
         // Nur abfragen, was schon läuft – sonst würde AppleScript die App starten.
         let s = Settings.shared
         let enabled: [Player] = (s.sourceESound ? [.esound] : []) + (s.sourceSpotify ? [.spotify] : []) + (s.sourceAppleMusic ? [.music] : [])
-        let states = enabled
-            .filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleID).isEmpty }
-            .compactMap { p in state(of: p).map { (p, $0) } }
+        let running = enabled.filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleID).isEmpty }
+
+        // eSound ist billig (Datei lesen) – bei jedem Takt. Apple Music/Spotify gehen über AppleScript,
+        // und das blockiert, bis die App antwortet: nur einmal pro Sekunde und nicht, während eSound spielt.
+        let esound = running.contains(.esound) ? state(of: .esound).map { (Player.esound, $0) } : nil
+        tick += 1
+        var scriptFresh = false
+        if esound?.1.playing == true {
+            scriptStates = []
+        } else if tick % 4 == 0 || player == nil && scriptStates.isEmpty {
+            scriptStates = running.filter { $0 != .esound }.compactMap { p in state(of: p).map { (p, $0) } }
+            scriptFresh = true
+        }
+        let states = (esound.map { [$0] } ?? []) + scriptStates
         guard let (p, s) = states.first(where: { $0.1.playing }) ?? states.first else {
             if player != nil {
                 player = nil; playing = false; title = ""; artist = ""; artwork = nil; lyrics = .none; trackKey = ""
@@ -180,7 +194,9 @@ final class MusicModel: ObservableObject {
         // neu stellen – die gelesene Position schwankt um ein paar Zehntel, das ließ die Lyrics an
         // Zeilengrenzen vor- und zurückspringen.
         let now = Date()
-        if !(s.playing && key == trackKey && abs(s.position - position(at: now)) < 0.6) {
+        // Zwischengespeicherte Apple-Music/Spotify-Werte sind bis zu 1 s alt – deren Position nicht übernehmen
+        let positionFresh = p == .esound || scriptFresh
+        if positionFresh, !(s.playing && key == trackKey && abs(s.position - position(at: now)) < 0.6) {
             position = s.position
             polledAt = now
         }
