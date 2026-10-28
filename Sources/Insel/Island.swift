@@ -496,29 +496,64 @@ struct Lyrics: View {
     let date: Date
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        Group {
             switch music.lyrics {
-            case .loaded:
-                let line = music.currentLyric(at: date)
-                Text(line?.current ?? "")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(music.accent)
-                    .id(line?.current)
-                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                Text((music.lyricsSynced ? "" : "≈ nicht synchron · ") + (line?.next ?? ""))
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+            case .loaded(let lines):
+                LyricsScroller(lines: lines, index: music.lyricIndex(at: date), accent: music.accent, synced: music.lyricsSynced)
             case .loading:
-                Text("Lyrics werden geladen …").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
+                hint("Lyrics werden geladen …")
             case .notFound:
-                Text("Keine Lyrics gefunden").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
+                hint("Keine Lyrics gefunden")
             case .none:
                 EmptyView()
             }
         }
-        .lineLimit(1)
-        .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: LyricsScroller.lineHeight * 2, alignment: .topLeading)
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
+    }
+}
+
+/// Alle Zeilen untereinander; beim Zeilenwechsel gleitet die Liste mit einer Feder nach oben
+/// (wie bei Apple Music). Die aktive Zeile ist groß und farbig, die anderen klein und blass.
+struct LyricsScroller: View {
+    let lines: [LyricLine]
+    let index: Int
+    let accent: Color
+    let synced: Bool
+
+    static let lineHeight: CGFloat = 21
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(lines.indices, id: \.self) { i in
+                let active = i == index
+                Text(lines[i].text)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(active ? accent : .white.opacity(i < index ? 0.2 : 0.42))
+                    .scaleEffect(active ? 1 : 0.84, anchor: .leading)
+                    .blur(radius: abs(i - index) > 1 ? 1.2 : 0)
+                    .frame(height: Self.lineHeight, alignment: .leading)
+            }
+        }
+        // Aktive Zeile steht oben, die nächste darunter
+        .offset(y: -CGFloat(index) * Self.lineHeight)
+        .animation(.spring(response: 0.55, dampingFraction: 0.86), value: index)
+        .frame(maxWidth: .infinity, maxHeight: Self.lineHeight * 2, alignment: .topLeading)
         .clipped()
-        .animation(.easeOut(duration: 0.25), value: music.currentLyric(at: date)?.current)
+        // Oben und unten weich ausblenden statt hart abschneiden
+        .mask(LinearGradient(stops: [
+            .init(color: .clear, location: 0), .init(color: .black, location: 0.12),
+            .init(color: .black, location: 0.8), .init(color: .clear, location: 1),
+        ], startPoint: .top, endPoint: .bottom))
+        .overlay(alignment: .topTrailing) {
+            if !synced {
+                Text("≈ nicht synchron").font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.35))
+            }
+        }
     }
 }
 

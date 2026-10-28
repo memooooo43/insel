@@ -91,11 +91,11 @@ final class MusicModel: ObservableObject {
         return min(duration, position + date.timeIntervalSince(polledAt))
     }
 
-    func currentLyric(at date: Date) -> (current: String, next: String)? {
-        guard case .loaded(let lines) = lyrics, !lines.isEmpty else { return nil }
+    /// Index der gerade gesungenen Zeile; -1 vor der ersten Zeile.
+    func lyricIndex(at date: Date) -> Int {
+        guard case .loaded(let lines) = lyrics, !lines.isEmpty else { return -1 }
         let pos = position(at: date) + 0.3 + Settings.shared.lyricsOffset
-        guard let i = lines.lastIndex(where: { $0.time <= pos }) else { return ("", lines[0].text) }
-        return (lines[i].text, i + 1 < lines.count ? lines[i + 1].text : "")
+        return lines.lastIndex(where: { $0.time <= pos }) ?? -1
     }
 
     func playPause() {
