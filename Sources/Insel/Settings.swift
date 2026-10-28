@@ -26,6 +26,9 @@ final class Settings: ObservableObject {
     @Published var showLyrics: Bool { didSet { save(showLyrics, "showLyrics") } }
     /// Positiv = Lyrics kommen früher, negativ = später (Sekunden)
     @Published var lyricsOffset: Double { didSet { save(lyricsOffset, "lyricsOffset") } }
+    /// eSound: am Song-Ende Mac-Lautstärke herunter- und beim nächsten wieder hochfahren
+    @Published var smoothTransitions: Bool { didSet { save(smoothTransitions, "smoothTransitions") } }
+    @Published var fadeSeconds: Double { didSet { save(fadeSeconds, "fadeSeconds") } }
 
     // Aussehen
     @Published var liquidGlass: Bool { didSet { save(liquidGlass, "liquidGlass") } }
@@ -46,6 +49,7 @@ final class Settings: ObservableObject {
         "showTray": true, "showBattery": true, "notifyCharging": true, "notifyAirPods": true,
         "showMusic": true, "sourceAppleMusic": true, "sourceSpotify": true, "sourceESound": true,
         "showEqualizer": true, "showLyrics": true, "lyricsOffset": 0.0,
+        "smoothTransitions": true, "fadeSeconds": 6.0,
         "liquidGlass": true, "glassDarkness": 0.3, "accentFromCover": true, "barThickness": 7.0,
         "showWeather": true, "fahrenheit": false,
         "fixedAccent": [0.55, 0.85, 0.75],
@@ -66,6 +70,8 @@ final class Settings: ObservableObject {
         showEqualizer = defaults.bool(forKey: "showEqualizer")
         showLyrics = defaults.bool(forKey: "showLyrics")
         lyricsOffset = defaults.double(forKey: "lyricsOffset")
+        smoothTransitions = defaults.bool(forKey: "smoothTransitions")
+        fadeSeconds = defaults.double(forKey: "fadeSeconds")
         liquidGlass = defaults.bool(forKey: "liquidGlass")
         glassDarkness = defaults.double(forKey: "glassDarkness")
         accentFromCover = defaults.bool(forKey: "accentFromCover")
@@ -87,6 +93,7 @@ final class Settings: ObservableObject {
         showMusic = fresh.showMusic; sourceAppleMusic = fresh.sourceAppleMusic
         sourceSpotify = fresh.sourceSpotify; sourceESound = fresh.sourceESound
         showEqualizer = fresh.showEqualizer; showLyrics = fresh.showLyrics; lyricsOffset = fresh.lyricsOffset
+        smoothTransitions = fresh.smoothTransitions; fadeSeconds = fresh.fadeSeconds
         liquidGlass = fresh.liquidGlass; glassDarkness = fresh.glassDarkness
         accentFromCover = fresh.accentFromCover; fixedAccent = fresh.fixedAccent; barThickness = fresh.barThickness
         showWeather = fresh.showWeather; fahrenheit = fresh.fahrenheit
@@ -186,7 +193,7 @@ enum SettingsPane: Int, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .general: return "Starten beim Login, wie schnell die Insel auf- und zuklappt und welche Funktionen sie hat."
-        case .music: return "Welche Player die Insel anzeigt, Equalizer und Lyrics."
+        case .music: return "Welche Player die Insel anzeigt, Equalizer, Lyrics und Übergänge."
         case .look: return "Liquid Glass, Akzentfarbe und Fortschrittsbalken."
         case .weather: return "Ort und Einheit für die Wetteranzeige oben rechts."
         case .about: return "Version, Quellcode und Zurücksetzen."
@@ -321,6 +328,16 @@ struct SettingsView: View {
             Text("Lyrics kommen von eSound selbst oder von LRCLIB. Kommen sie zu spät, den Versatz erhöhen – zu früh, verringern.")
         }
         .disabled(!settings.showMusic)
+        Section {
+            Toggle("Sanfte Übergänge bei eSound", isOn: $settings.smoothTransitions)
+            SliderRow(title: "Ausblenden über", value: $settings.fadeSeconds, range: 3...10, step: 1, unit: "s")
+                .disabled(!settings.smoothTransitions)
+        } header: {
+            Text("Übergänge")
+        } footer: {
+            Text("eSound kann selbst nicht überblenden. Die Insel fährt deshalb am Song-Ende die Lautstärke des Macs herunter und beim nächsten Song wieder hoch – in dieser Zeit sind auch andere Töne leiser.")
+        }
+        .disabled(!settings.showMusic || !settings.sourceESound)
     }
 
     @ViewBuilder private var look: some View {

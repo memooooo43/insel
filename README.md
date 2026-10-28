@@ -10,6 +10,7 @@ Eine „Dynamic Island“ für die Notch des MacBooks – mit Musik-Player, Live
 - **Live-Lyrics**, synchron zur Wiedergabe (von eSound selbst oder über [LRCLIB](https://lrclib.net)); gibt es nur ungetimten Text, wird er über den Song verteilt
 - **Ablage**: Dateien auf die Notch ziehen, später wieder herausziehen
 - **Hinweise**, wenn das Ladekabel eingesteckt wird oder AirPods sich verbinden (mit Akkustand)
+- **Sanfte Übergänge** für eSound (das selbst nicht überblenden kann): am Song-Ende wird die Mac-Lautstärke heruntergefahren, beim nächsten Song wieder hoch
 - **Wetter** über [Open-Meteo](https://open-meteo.com) – kostenlos, ohne Account
 - **Liquid Glass** (macOS 26+), animiert mit SwiftUI und Core Animation, < 1 % CPU
 
@@ -20,7 +21,7 @@ Fährt man mit der Maus auf die Notch, klappt die Insel auf.
 Über das Zahnrad in der ausgeklappten Insel oder per Rechtsklick → *Einstellungen …* öffnet sich ein Fenster im Stil der macOS-Systemeinstellungen. Alles wirkt sofort, ohne Neustart:
 
 - **Allgemein:** beim Login starten, Öffnen-/Schließen-Verzögerung, Ablage, Akkuanzeige, Lade- und AirPods-Hinweise
-- **Musik:** Quellen (Apple Music, Spotify, eSound), Equalizer, Lyrics und Lyrics-Versatz
+- **Musik:** Quellen (Apple Music, Spotify, eSound), Equalizer, Lyrics und Lyrics-Versatz, sanfte Übergänge bei eSound
 - **Aussehen:** Liquid Glass und Abdunkelung, Akzentfarbe (aus dem Cover oder eigene), Dicke des Fortschrittsbalkens
 - **Wetter:** an/aus, Stadt oder aktueller Standort, °C/°F
 

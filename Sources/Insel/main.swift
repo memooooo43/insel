@@ -23,7 +23,9 @@ final class IslandUI: ObservableObject {
     let airpods = AirPodsModel()
     let weather = WeatherModel()
     let tray = TrayModel()
+    let fader = TransitionFader()
     private var bag: [AnyCancellable] = []
+    private var faderTimer: Timer?
 
     static let expandedSize = CGSize(width: 620, height: 196)
     static let flareCollapsed: CGFloat = 7
@@ -38,6 +40,8 @@ final class IslandUI: ObservableObject {
             self?.objectWillChange.send()
             self?.music.objectWillChange.send()
         })
+        guard !demoMode else { return }
+        faderTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.tickFader() }
         battery.onPluggedIn = { [weak self] in
             guard let self, Settings.shared.notifyCharging else { return }
             self.show(IslandEvent(icon: "bolt.fill", value: "\(self.battery.level) %", color: .green))
@@ -57,6 +61,14 @@ final class IslandUI: ObservableObject {
         if event != nil { return CGSize(width: base + 150, height: notch.height) }
         if music.isActive { return CGSize(width: base + 84, height: notch.height) }
         return hasNotch ? CGSize(width: base, height: notch.height) : CGSize(width: 220, height: 6)
+    }
+
+    private func tickFader() {
+        let s = Settings.shared, now = Date()
+        fader.tick(enabled: s.smoothTransitions && s.showMusic && music.player == .esound,
+                   playing: music.playing, track: "\(music.title)|\(music.artist)",
+                   remaining: music.duration - music.position(at: now),
+                   fadeSeconds: s.fadeSeconds, duration: music.duration, now: now)
     }
 
     func show(_ e: IslandEvent) {
@@ -196,6 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Das Panel ist größer als die Insel. Damit die Menüleiste klickbar bleibt, lässt es Klicks
     /// nur innerhalb der Insel zu – und öffnet/schließt sie beim Hovern.
+    func applicationWillTerminate(_ notification: Notification) {
+        // Nicht mit heruntergefahrener Lautstärke aufhören
+        ui.fader.restore()
+    }
+
     private var mediaKeyTap: CFMachPort?
 
     /// Liest die Play/Pause-Taste der Tastatur mit (lässt sie unverändert durch). eSound verrät eine Pause
@@ -340,6 +357,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+
+// Beim Abmelden oder `install.sh` kommt SIGTERM – sauber beenden, damit applicationWillTerminate läuft
+signal(SIGTERM, SIG_IGN)
+let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+termSource.setEventHandler { NSApp.terminate(nil) }
+termSource.resume()
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
