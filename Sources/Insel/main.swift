@@ -94,7 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.ignoresMouseEvents = true
         panel.acceptsMouseMovedEvents = true
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // .transient: in Mission Control/Exposé ausblenden, damit die Insel die Schreibtisch-Leiste nicht verdeckt
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
         panel.contentView = NSHostingView(rootView: IslandView(ui: ui))
         place()
         panel.orderFrontRegardless()
@@ -103,6 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // kommen Mausbewegungen sonst nicht zuverlässig an.
         let timer = Timer(timeInterval: 0.04, repeats: true) { [weak self] _ in self?.track() }
         RunLoop.main.add(timer, forMode: .common)
+        let overviewTimer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in self?.checkOverview() }
+        RunLoop.main.add(overviewTimer, forMode: .common)
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -190,7 +193,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Das Panel ist größer als die Insel. Damit die Menüleiste klickbar bleibt, lässt es Klicks
     /// nur innerhalb der Insel zu – und öffnet/schließt sie beim Hovern.
+    private var overviewOpen = false
+
+    /// Mission Control, App-Übersicht und Launchpad zeichnet das Dock als bildschirmfüllendes Fenster.
+    /// Solange das offen ist, blendet sich die Insel aus – sonst verdeckt sie die Schreibtisch-Leiste.
+    private func checkOverview() {
+        let f = screen.frame
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let open = windows.contains { w in
+            guard w[kCGWindowOwnerName as String] as? String == "Dock",
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
+            return (b["Width"] ?? 0) >= f.width && (b["Height"] ?? 0) >= f.height
+        }
+        guard open != overviewOpen else { return }
+        overviewOpen = open
+        if open {
+            expandWork?.cancel(); expandWork = nil
+            ui.expanded = false
+            panel.ignoresMouseEvents = true
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            panel.animator().alphaValue = open ? 0 : 1
+        }
+    }
+
     private func track() {
+        guard !overviewOpen else { return }
         let p = NSEvent.mouseLocation
         let f = screen.frame
         let s = ui.size
