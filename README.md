@@ -7,7 +7,7 @@ Eine „Dynamic Island“ für die Notch des MacBooks – mit Musik-Player, Live
 ## Funktionen
 
 - **Musik-Player** für Apple Music, Spotify und eSound: Cover, Titel, Fortschrittsbalken zum Spulen, Play/Pause/Weiter/Zurück
-- **Live-Lyrics**, synchron zur Wiedergabe (von eSound selbst oder über [LRCLIB](https://lrclib.net))
+- **Live-Lyrics**, synchron zur Wiedergabe (von eSound selbst oder über [LRCLIB](https://lrclib.net)); gibt es nur ungetimten Text, wird er über den Song verteilt
 - **Ablage**: Dateien auf die Notch ziehen, später wieder herausziehen
 - **Hinweise**, wenn das Ladekabel eingesteckt wird oder AirPods sich verbinden (mit Akkustand)
 - **Wetter** über [Open-Meteo](https://open-meteo.com) – kostenlos, ohne Account
@@ -17,7 +17,7 @@ Fährt man mit der Maus auf die Notch, klappt die Insel auf.
 
 ## Einstellungen
 
-Über das Zahnrad in der ausgeklappten Insel oder per Rechtsklick → *Einstellungen …* – alles wirkt sofort, ohne Neustart:
+Über das Zahnrad in der ausgeklappten Insel oder per Rechtsklick → *Einstellungen …* öffnet sich ein Fenster im Stil der macOS-Systemeinstellungen. Alles wirkt sofort, ohne Neustart:
 
 - **Allgemein:** beim Login starten, Öffnen-/Schließen-Verzögerung, Ablage, Akkuanzeige, Lade- und AirPods-Hinweise
 - **Musik:** Quellen (Apple Music, Spotify, eSound), Equalizer, Lyrics und Lyrics-Versatz

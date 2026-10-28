@@ -149,13 +149,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// `Insel --snapshot-settings <ordner>`: die vier Tabs des Einstellungsfensters als Bilder.
+    /// `Insel --snapshot-settings <ordner>`: alle Seiten des Einstellungsfensters als Bilder.
     private func snapshotSettings(to folder: String) {
         demoMode = true
         var windows: [NSWindow] = []
-        for i in 0..<4 {
-            let view = NSHostingView(rootView: SettingsView(ui: ui, settings: .shared, tab: SettingsTab(i)))
-            let w = NSWindow(contentRect: NSRect(x: -5000, y: -5000, width: 500, height: 440), styleMask: .titled, backing: .buffered, defer: false)
+        for pane in SettingsPane.allCases {
+            let view = NSHostingView(rootView: SettingsView(ui: ui, settings: .shared, tab: SettingsTab(pane)))
+            let w = NSWindow(contentRect: NSRect(x: -5000, y: -5000, width: 740, height: 540), styleMask: .titled, backing: .buffered, defer: false)
             w.contentView = view
             w.orderFrontRegardless()
             windows.append(w)

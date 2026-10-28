@@ -505,11 +505,12 @@ struct Lyrics: View {
                     .foregroundStyle(music.accent)
                     .id(line?.current)
                     .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                Text(line?.next ?? "").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                Text((music.lyricsSynced ? "" : "≈ nicht synchron · ") + (line?.next ?? ""))
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
             case .loading:
                 Text("Lyrics werden geladen …").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
             case .notFound:
-                Text("Keine synchronisierten Lyrics gefunden").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
+                Text("Keine Lyrics gefunden").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
             case .none:
                 EmptyView()
             }

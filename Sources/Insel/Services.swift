@@ -50,6 +50,8 @@ final class MusicModel: ObservableObject {
     @Published var coverAccent = Color(red: 0.55, green: 0.85, blue: 0.75)
     var accent: Color { Settings.shared.accentFromCover ? coverAccent : Settings.shared.fixedAccent }
     @Published var lyrics = LyricsState.none
+    /// false = nur ungetimter Liedtext gefunden, Zeilen sind gleichmäßig über den Song verteilt
+    @Published var lyricsSynced = true
 
     private var position: Double = 0
     private var polledAt = Date()
@@ -58,6 +60,12 @@ final class MusicModel: ObservableObject {
     /// Nach einem Klick in der Insel gilt kurz unser Wert, bis eSound die Datei nachgezogen hat.
     private var esOverride: (playing: Bool, position: Double, at: Date)?
     private var trackKey = ""
+    /// Lyrics, die beim Songwechsel noch in der eSound-Datei stehen, gehören zum vorherigen Song.
+    private var staleLyricsSig: String?
+    /// Lyrics vom Player selbst (eSound) übernommen – dann keine eigene Suche mehr.
+    private var appliedLyricsSig: String?
+    /// Zuletzt gesehener ungetimter Text vom Player – Rückfall, falls LRCLIB nichts Synchrones hat
+    private var playerPlainLyrics: String?
     private var timer: Timer?
 
     init() {
@@ -145,6 +153,8 @@ final class MusicModel: ObservableObject {
         let playing: Bool, title: String, artist: String, album: String, duration: Double, position: Double
         var artworkURL: URL? = nil
         var lyrics: [LyricLine] = []
+        /// Ungetimter Liedtext vom Player (eSound holt ihn z. B. von Genius)
+        var plainLyrics: String? = nil
     }
 
     private func poll() {
@@ -170,9 +180,28 @@ final class MusicModel: ObservableObject {
 
         let key = "\(p.rawValue)|\(s.title)|\(s.artist)"
         if key != trackKey {
+            let wasPlaying = !trackKey.isEmpty
             trackKey = key
             loadArtwork(p, url: s.artworkURL)
-            if s.lyrics.isEmpty { loadLyrics(s, key: key) } else { lyrics = .loaded(s.lyrics) }
+            staleLyricsSig = wasPlaying ? (!s.lyrics.isEmpty ? Self.signature(s.lyrics) : s.plainLyrics) : nil
+            appliedLyricsSig = nil
+            lyrics = .loading
+            // eSound lädt seine Lyrics erst kurz nach dem Wechsel – eigene Suche nur, wenn dann keine kommen
+            playerPlainLyrics = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + (p == .esound ? 2.5 : 0)) { [weak self] in
+                guard let self, self.trackKey == key, self.appliedLyricsSig == nil else { return }
+                self.loadLyrics(s, key: key, plain: self.playerPlainLyrics)
+            }
+        }
+        if let plain = s.plainLyrics, plain.hashValue != staleLyricsSig?.hashValue { playerPlainLyrics = plain }
+        // Neue Lyrics vom Player übernehmen, sobald sie in der Datei stehen
+        if !s.lyrics.isEmpty {
+            let sig = Self.signature(s.lyrics)
+            if sig != staleLyricsSig, sig != appliedLyricsSig {
+                appliedLyricsSig = sig
+                lyricsSynced = true
+                lyrics = .loaded(s.lyrics)
+            }
         }
     }
 
@@ -271,63 +300,121 @@ final class MusicModel: ObservableObject {
             }
         }
 
+        // Synchron: [{time, verse}] – ungetimt (z. B. von Genius): nur [{verse}]
         var lyrics: [LyricLine] = []
-        if bool(d["syncedLyrics"]) == true, let raw = d["lyrics"] as? String,
-           let lines = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: Any]] {
-            lyrics = lines.compactMap { l in
-                guard let t = number(l["time"]), let v = l["verse"] as? String else { return nil }
-                return LyricLine(time: t, text: v.isEmpty ? "♪" : v)
+        var plain: String?
+        if let raw = d["lyrics"] as? String,
+           let lines = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], !lines.isEmpty {
+            if bool(d["syncedLyrics"]) == true {
+                lyrics = lines.compactMap { l in
+                    guard let t = number(l["time"]), let v = l["verse"] as? String else { return nil }
+                    return LyricLine(time: t, text: v.isEmpty ? "♪" : v)
+                }
+            } else {
+                plain = lines.compactMap { $0["verse"] as? String }.joined(separator: "\n")
             }
         }
 
         let thumb = (item["thumbnailL"] as? String) ?? (item["thumbnailM"] as? String)
         return State(playing: playing, title: title, artist: artists.joined(separator: ", "), album: album,
                      duration: duration, position: min(max(position, 0), duration),
-                     artworkURL: thumb.flatMap(URL.init(string:)), lyrics: lyrics)
+                     artworkURL: thumb.flatMap(URL.init(string:)), lyrics: lyrics, plainLyrics: plain)
     }
 
     // MARK: Lyrics über LRCLIB (kostenlos, ohne Account)
 
     private struct LrcLib: Decodable {
         let syncedLyrics: String?
+        let plainLyrics: String?
+        let duration: Double?
     }
 
-    private func loadLyrics(_ s: State, key: String) {
-        lyrics = .loading
-        var get = URLComponents(string: "https://lrclib.net/api/get")!
-        get.queryItems = [
-            .init(name: "track_name", value: s.title), .init(name: "artist_name", value: s.artist),
-            .init(name: "album_name", value: s.album), .init(name: "duration", value: String(Int(s.duration.rounded()))),
+    /// Sucht bei LRCLIB in mehreren Anläufen – vom genauesten zum lockersten.
+    /// Synchronisierte Lyrics haben Vorrang, sonst wird reiner Liedtext genommen.
+    private func loadLyrics(_ s: State, key: String, plain: String? = nil) {
+        let title = Self.cleanTitle(s.title), artist = Self.firstArtist(s.artist)
+        let duration = String(Int(s.duration.rounded()))
+        func url(_ path: String, _ items: [(String, String)]) -> URL {
+            var c = URLComponents(string: "https://lrclib.net/api/\(path)")!
+            c.queryItems = items.map { URLQueryItem(name: $0.0, value: $0.1) }
+            return c.url!
+        }
+        let attempts = [
+            url("get", [("track_name", s.title), ("artist_name", s.artist), ("album_name", s.album), ("duration", duration)]),
+            url("get", [("track_name", title), ("artist_name", artist), ("duration", duration)]),
+            url("search", [("track_name", title), ("artist_name", artist)]),
+            url("search", [("q", "\(title) \(artist)")]),
         ]
-        var search = URLComponents(string: "https://lrclib.net/api/search")!
-        search.queryItems = [.init(name: "track_name", value: s.title), .init(name: "artist_name", value: s.artist)]
+        tryLyrics(attempts, key: key, duration: s.duration, plain: plain)
+    }
 
-        Self.fetch(get.url!) { (hit: LrcLib?) in
-            if let synced = hit?.syncedLyrics {
-                self.finishLyrics(synced, key: key)
+    private func tryLyrics(_ urls: [URL], key: String, duration: Double, plain: String?) {
+        guard trackKey == key, appliedLyricsSig == nil else { return }
+        guard let url = urls.first else { finishLyrics(synced: nil, plain: plain, key: key, duration: duration); return }
+        Self.fetchData(url) { data in
+            // /get liefert ein Objekt, /search eine Liste
+            let decoder = JSONDecoder()
+            let hits = data.flatMap { (try? decoder.decode([LrcLib].self, from: $0)) ?? (try? decoder.decode(LrcLib.self, from: $0)).map { [$0] } } ?? []
+            // Nur Treffer mit passender Länge – sonst stimmt das Timing nicht (andere Version)
+            let fits = hits.filter { h in duration <= 0 || h.duration.map { abs($0 - duration) < 8 } ?? true }
+            if let synced = fits.first(where: { $0.syncedLyrics?.isEmpty == false })?.syncedLyrics {
+                self.finishLyrics(synced: synced, plain: nil, key: key, duration: duration)
                 return
             }
-            Self.fetch(search.url!) { (hits: [LrcLib]?) in
-                self.finishLyrics(hits?.first { $0.syncedLyrics != nil }?.syncedLyrics, key: key)
-            }
+            let plainHit = plain ?? fits.first(where: { $0.plainLyrics?.isEmpty == false })?.plainLyrics
+            DispatchQueue.main.async { self.tryLyrics(Array(urls.dropFirst()), key: key, duration: duration, plain: plainHit) }
         }
     }
 
-    private func finishLyrics(_ synced: String?, key: String) {
-        let lines = synced.map(Self.parseLRC) ?? []
+    private func finishLyrics(synced: String?, plain: String?, key: String, duration: Double) {
+        var lines = synced.map(Self.parseLRC) ?? []
+        let isSynced = !lines.isEmpty
+        if lines.isEmpty, let plain {
+            // Ungetimten Text gleichmäßig über den Song verteilen – besser als gar nichts
+            // Leerzeilen und Abschnitts-Überschriften wie „[Refrain]“ weglassen
+            let texts = plain.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && !($0.hasPrefix("[") && $0.hasSuffix("]")) }
+            lines = texts.enumerated().map { i, text in
+                LyricLine(time: duration * (0.08 + 0.85 * Double(i) / Double(max(texts.count, 1))), text: text)
+            }
+        }
         DispatchQueue.main.async {
-            guard self.trackKey == key else { return }
+            guard self.trackKey == key, self.appliedLyricsSig == nil else { return }
+            self.lyricsSynced = isSynced
             self.lyrics = lines.isEmpty ? .notFound : .loaded(lines)
         }
     }
 
-    private static func fetch<T: Decodable>(_ url: URL, done: @escaping (T?) -> Void) {
+    private static func fetchData(_ url: URL, done: @escaping (Data?) -> Void) {
         var request = URLRequest(url: url)
-        request.setValue("Insel/1.0 (macOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Insel/1.0 (https://github.com/memooooo43/insel)", forHTTPHeaderField: "User-Agent")
         URLSession.shared.dataTask(with: request) { data, response, _ in
-            guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { done(nil); return }
-            done(try? JSONDecoder().decode(T.self, from: data))
+            done((response as? HTTPURLResponse)?.statusCode == 200 ? data : nil)
         }.resume()
+    }
+
+    /// „Song (feat. X) - 2011 Remaster“ → „Song“
+    static func cleanTitle(_ title: String) -> String {
+        var t = title
+        for pattern in [
+            #"\s*[\(\[](feat\.?|ft\.?|with|prod\.?)\s[^\)\]]*[\)\]]"#,
+            #"\s*[\(\[][^\)\]]*(remaster|version|edit|live|mono|stereo)[^\)\]]*[\)\]]"#,
+            #"\s+-\s+.*(remaster|version|edit|live).*$"#,
+        ] {
+            t = t.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+        }
+        return t.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// „A, B & C“ → „A“
+    static func firstArtist(_ artist: String) -> String {
+        let first = artist.components(separatedBy: CharacterSet(charactersIn: ",&")).first ?? artist
+        return first.replacingOccurrences(of: #"\s+(feat\.?|ft\.?|x)\s.*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func signature(_ lines: [LyricLine]) -> String {
+        "\(lines.count)|\(lines.first?.time ?? 0)|\(lines.first?.text ?? "")"
     }
 
     /// "[01:23.45] Text" → LyricLine

@@ -127,7 +127,7 @@ final class Settings: ObservableObject {
     }
 }
 
-// MARK: - Fenster
+// MARK: - Fenster (aufgebaut wie die macOS-Systemeinstellungen)
 
 final class SettingsWindow {
     private static var window: NSWindow?
@@ -135,8 +135,11 @@ final class SettingsWindow {
     static func show(ui: IslandUI) {
         if window == nil {
             let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(ui: ui, settings: .shared)))
-            w.title = "Insel – Einstellungen"
-            w.styleMask = [.titled, .closable, .miniaturizable]
+            w.title = "Insel"
+            w.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.toolbarStyle = .unified
             w.isReleasedWhenClosed = false
             w.center()
             window = w
@@ -146,10 +149,70 @@ final class SettingsWindow {
     }
 }
 
-/// Gewählter Tab (eigene Klasse statt @State, siehe IslandUI).
+enum SettingsPane: Int, CaseIterable, Identifiable {
+    case general, music, look, weather, about
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: return "Allgemein"
+        case .music: return "Musik"
+        case .look: return "Aussehen"
+        case .weather: return "Wetter"
+        case .about: return "Info"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape.fill"
+        case .music: return "music.note"
+        case .look: return "paintpalette.fill"
+        case .weather: return "cloud.sun.fill"
+        case .about: return "info.circle.fill"
+        }
+    }
+
+    var colors: [Color] {
+        switch self {
+        case .general: return [Color(white: 0.6), Color(white: 0.42)]
+        case .music: return [Color(red: 1, green: 0.38, blue: 0.45), Color(red: 0.92, green: 0.2, blue: 0.32)]
+        case .look: return [Color(red: 0.55, green: 0.45, blue: 1), Color(red: 0.35, green: 0.3, blue: 0.9)]
+        case .weather: return [Color(red: 0.35, green: 0.75, blue: 1), Color(red: 0.15, green: 0.5, blue: 0.95)]
+        case .about: return [Color(red: 0.3, green: 0.6, blue: 1), Color(red: 0.15, green: 0.4, blue: 0.9)]
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .general: return "Starten beim Login, wie schnell die Insel auf- und zuklappt und welche Funktionen sie hat."
+        case .music: return "Welche Player die Insel anzeigt, Equalizer und Lyrics."
+        case .look: return "Liquid Glass, Akzentfarbe und Fortschrittsbalken."
+        case .weather: return "Ort und Einheit für die Wetteranzeige oben rechts."
+        case .about: return "Version, Quellcode und Zurücksetzen."
+        }
+    }
+}
+
+/// Farbiges Symbol wie in den Systemeinstellungen.
+struct PaneIcon: View {
+    let pane: SettingsPane
+    var size: CGFloat = 20
+
+    var body: some View {
+        Image(systemName: pane.symbol)
+            .font(.system(size: size * 0.55, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                .fill(LinearGradient(colors: pane.colors, startPoint: .top, endPoint: .bottom)))
+    }
+}
+
+/// Gewählte Seite (eigene Klasse statt @State, siehe IslandUI).
 final class SettingsTab: ObservableObject {
-    @Published var selected = 0
-    init(_ selected: Int = 0) { self.selected = selected }
+    @Published var selected: SettingsPane? = .general
+    init(_ pane: SettingsPane = .general) { selected = pane }
 }
 
 struct SettingsView: View {
@@ -158,111 +221,166 @@ struct SettingsView: View {
     @ObservedObject var tab = SettingsTab()
 
     var body: some View {
-        TabView(selection: $tab.selected) {
-            general.tabItem { Label("Allgemein", systemImage: "gearshape") }.tag(0)
-            music.tabItem { Label("Musik", systemImage: "music.note") }.tag(1)
-            look.tabItem { Label("Aussehen", systemImage: "paintpalette") }.tag(2)
-            weather.tabItem { Label("Wetter", systemImage: "cloud.sun") }.tag(3)
-        }
-        .frame(width: 500, height: 440)
-    }
+        NavigationSplitView {
+            List(selection: $tab.selected) {
+                // Kopf wie das Apple-Konto in den Systemeinstellungen
+                HStack(spacing: 10) {
+                    Image(systemName: "capsule.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(LinearGradient(colors: [Color(white: 0.25), .black], startPoint: .top, endPoint: .bottom)))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Insel").font(.headline)
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 6)
+                .selectionDisabled()
 
-    private var general: some View {
-        Form {
-            Section {
-                Toggle("Beim Login starten", isOn: Binding(get: { settings.launchAtLogin }, set: { settings.launchAtLogin = $0 }))
-            }
-            Section("Öffnen & Schließen") {
-                SliderRow(title: "Öffnen nach", value: $settings.openDelay, range: 0...0.6, step: 0.05, unit: "s")
-                SliderRow(title: "Schließen nach", value: $settings.closeDelay, range: 0.1...1.5, step: 0.05, unit: "s")
-            }
-            Section("Funktionen") {
-                Toggle("Ablage für Dateien", isOn: $settings.showTray)
-                Toggle("Akkustand oben rechts", isOn: $settings.showBattery)
-                Toggle("Hinweis beim Einstecken des Ladekabels", isOn: $settings.notifyCharging)
-                Toggle("Hinweis, wenn sich AirPods verbinden", isOn: $settings.notifyAirPods)
-                Button("Ablage leeren") { ui.tray.clear() }.disabled(ui.tray.files.isEmpty)
-            }
-            Section {
-                HStack {
-                    Spacer()
-                    Button("Alles zurücksetzen") { settings.reset() }
-                    Button("Insel beenden") { NSApp.terminate(nil) }
+                ForEach(SettingsPane.allCases) { pane in
+                    Label { Text(pane.title) } icon: { PaneIcon(pane: pane) }
+                        .tag(pane)
                 }
             }
+            .navigationSplitViewColumnWidth(210)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            let pane = tab.selected ?? .general
+            Form {
+                Section {
+                    VStack(spacing: 8) {
+                        PaneIcon(pane: pane, size: 56)
+                        Text(pane.title).font(.title2.bold())
+                        Text(pane.subtitle)
+                            .font(.callout).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                content(for: pane)
+            }
+            .formStyle(.grouped)
+            .navigationTitle(pane.title)
         }
-        .formStyle(.grouped)
+        .frame(width: 740, height: 540)
     }
 
-    private var music: some View {
-        Form {
-            Section {
-                Toggle("Musik in der Insel anzeigen", isOn: $settings.showMusic)
-            }
-            Section("Quellen") {
-                Toggle("Apple Music", isOn: $settings.sourceAppleMusic)
-                Toggle("Spotify", isOn: $settings.sourceSpotify)
-                Toggle("eSound", isOn: $settings.sourceESound)
-            }
-            .disabled(!settings.showMusic)
-            Section("Anzeige") {
-                Toggle("Equalizer neben der Notch", isOn: $settings.showEqualizer)
-                Toggle("Lyrics", isOn: $settings.showLyrics)
-                SliderRow(title: "Lyrics-Versatz", value: $settings.lyricsOffset, range: -3...3, step: 0.1, unit: "s", signed: true)
-                    .disabled(!settings.showLyrics)
-                Text("Kommen die Lyrics zu spät, den Wert erhöhen – kommen sie zu früh, verringern.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .disabled(!settings.showMusic)
+    @ViewBuilder
+    private func content(for pane: SettingsPane) -> some View {
+        switch pane {
+        case .general: general
+        case .music: music
+        case .look: look
+        case .weather: weather
+        case .about: about
         }
-        .formStyle(.grouped)
     }
 
-    private var look: some View {
-        Form {
-            Section("Liquid Glass") {
-                Toggle("Glas-Optik beim Ausklappen", isOn: $settings.liquidGlass)
-                SliderRow(title: "Abdunkelung", value: $settings.glassDarkness, range: 0...0.9, step: 0.05, unit: "%", percent: true)
-                    .disabled(!settings.liquidGlass)
-            }
-            Section("Farbe") {
-                Picker("Akzentfarbe", selection: $settings.accentFromCover) {
-                    Text("Aus dem Cover").tag(true)
-                    Text("Eigene Farbe").tag(false)
-                }
-                ColorPicker("Eigene Farbe", selection: $settings.fixedAccent, supportsOpacity: false)
-                    .disabled(settings.accentFromCover)
-            }
-            Section("Fortschrittsbalken") {
-                SliderRow(title: "Dicke", value: $settings.barThickness, range: 3...12, step: 1, unit: "px")
+    @ViewBuilder private var general: some View {
+        Section {
+            Toggle("Beim Login starten", isOn: Binding(get: { settings.launchAtLogin }, set: { settings.launchAtLogin = $0 }))
+        }
+        Section("Öffnen & Schließen") {
+            SliderRow(title: "Öffnen nach", value: $settings.openDelay, range: 0...0.6, step: 0.05, unit: "s")
+            SliderRow(title: "Schließen nach", value: $settings.closeDelay, range: 0.1...1.5, step: 0.05, unit: "s")
+        }
+        Section("Funktionen") {
+            Toggle("Ablage für Dateien", isOn: $settings.showTray)
+            Toggle("Akkustand oben rechts", isOn: $settings.showBattery)
+            Toggle("Hinweis beim Einstecken des Ladekabels", isOn: $settings.notifyCharging)
+            Toggle("Hinweis, wenn sich AirPods verbinden", isOn: $settings.notifyAirPods)
+        }
+        Section {
+            LabeledContent("Dateien in der Ablage") {
+                Button("Ablage leeren") { ui.tray.clear() }
             }
         }
-        .formStyle(.grouped)
     }
 
-    private var weather: some View {
-        Form {
-            Section {
-                Toggle("Wetter oben rechts anzeigen", isOn: $settings.showWeather)
-            }
-            Section("Ort") {
-                HStack {
-                    TextField("Stadt", text: $settings.city, prompt: Text("leer = aktueller Standort"))
-                        .onSubmit(applyCity)
-                    Button("Übernehmen", action: applyCity)
-                }
-            }
-            .disabled(!settings.showWeather)
-            Section("Einheit") {
-                Picker("Temperatur", selection: $settings.fahrenheit) {
-                    Text("°C").tag(false)
-                    Text("°F").tag(true)
-                }
-                .pickerStyle(.segmented)
-            }
-            .disabled(!settings.showWeather)
+    @ViewBuilder private var music: some View {
+        Section {
+            Toggle("Musik in der Insel anzeigen", isOn: $settings.showMusic)
         }
-        .formStyle(.grouped)
+        Section("Quellen") {
+            Toggle("Apple Music", isOn: $settings.sourceAppleMusic)
+            Toggle("Spotify", isOn: $settings.sourceSpotify)
+            Toggle("eSound", isOn: $settings.sourceESound)
+        }
+        .disabled(!settings.showMusic)
+        Section {
+            Toggle("Equalizer neben der Notch", isOn: $settings.showEqualizer)
+            Toggle("Lyrics", isOn: $settings.showLyrics)
+            SliderRow(title: "Lyrics-Versatz", value: $settings.lyricsOffset, range: -3...3, step: 0.1, unit: "s", signed: true)
+                .disabled(!settings.showLyrics)
+        } header: {
+            Text("Anzeige")
+        } footer: {
+            Text("Lyrics kommen von eSound selbst oder von LRCLIB. Kommen sie zu spät, den Versatz erhöhen – zu früh, verringern.")
+        }
+        .disabled(!settings.showMusic)
+    }
+
+    @ViewBuilder private var look: some View {
+        Section("Liquid Glass") {
+            Toggle("Glas-Optik beim Ausklappen", isOn: $settings.liquidGlass)
+            SliderRow(title: "Abdunkelung", value: $settings.glassDarkness, range: 0...0.9, step: 0.05, unit: "%", percent: true)
+                .disabled(!settings.liquidGlass)
+        }
+        Section("Farbe") {
+            Picker("Akzentfarbe", selection: $settings.accentFromCover) {
+                Text("Aus dem Cover").tag(true)
+                Text("Eigene Farbe").tag(false)
+            }
+            ColorPicker("Eigene Farbe", selection: $settings.fixedAccent, supportsOpacity: false)
+                .disabled(settings.accentFromCover)
+        }
+        Section("Fortschrittsbalken") {
+            SliderRow(title: "Dicke", value: $settings.barThickness, range: 3...12, step: 1, unit: "px")
+        }
+    }
+
+    @ViewBuilder private var weather: some View {
+        Section {
+            Toggle("Wetter oben rechts anzeigen", isOn: $settings.showWeather)
+        }
+        Section {
+            HStack {
+                TextField("Stadt", text: $settings.city, prompt: Text("leer = aktueller Standort"))
+                    .onSubmit(applyCity)
+                Button("Übernehmen", action: applyCity)
+            }
+            Picker("Temperatur", selection: $settings.fahrenheit) {
+                Text("°C").tag(false)
+                Text("°F").tag(true)
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Ort & Einheit")
+        } footer: {
+            Text("Wetterdaten von Open-Meteo – kostenlos und ohne Account.")
+        }
+        .disabled(!settings.showWeather)
+    }
+
+    @ViewBuilder private var about: some View {
+        Section {
+            LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
+            LabeledContent("Quellcode") {
+                Link("github.com/memooooo43/insel", destination: URL(string: "https://github.com/memooooo43/insel")!)
+            }
+            LabeledContent("Gebaut mit", value: "Claude Code")
+        }
+        Section {
+            LabeledContent("Alle Einstellungen") {
+                Button("Zurücksetzen") { settings.reset() }
+            }
+            LabeledContent("Insel") {
+                Button("Beenden") { NSApp.terminate(nil) }
+            }
+        }
     }
 
     private func applyCity() {
