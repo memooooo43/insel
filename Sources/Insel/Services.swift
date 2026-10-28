@@ -60,6 +60,8 @@ final class MusicModel: ObservableObject {
     /// Nach einem Klick in der Insel gilt kurz unser Wert, bis eSound die Datei nachgezogen hat.
     private var esOverride: (playing: Bool, position: Double, at: Date)?
     private var tick = 0
+    /// Wann eSound zuletzt userPaused: true geschrieben hat (Beginn einer Pause in eSound)
+    private var esPausedWrite: Date?
     /// Letzter Stand von Apple Music/Spotify (werden seltener abgefragt)
     private var scriptStates: [(Player, State)] = []
     private var trackKey = ""
@@ -126,14 +128,6 @@ final class MusicModel: ObservableObject {
             return
         }
         command("set player position to \(String(format: "%.2f", fraction * duration))", player)
-    }
-
-    /// Die Play/Pause-Taste der Tastatur wurde gedrückt (siehe AppDelegate). Bei eSound sofort umschalten –
-    /// die Datei verrät eine Pause per Taste sonst erst nach ~1,5 s.
-    func mediaKeyPlayPause() {
-        guard player == .esound else { return }
-        toggleOptimistically()
-        log("Medientaste: \(playing ? "Play" : "Pause")")
     }
 
     /// Sofort umschalten und die Zeit anhalten bzw. weiterlaufen lassen, bis eSound die Datei nachzieht.
@@ -317,12 +311,22 @@ final class MusicModel: ObservableObject {
         let written = (try? FileManager.default.attributesOfItem(atPath: Self.esoundFile.path))?[.modificationDate] as? Date ?? .distantPast
         let elapsed = number(d["elapsedTime"]) ?? 0
 
-        // Pausiert, wenn eSound es meldet (schreibt beim Pausieren sofort userPaused: true) oder
-        // die Datei länger nicht geschrieben hat – beim Abspielen schreibt eSound jede Sekunde.
-        // (Pausieren per Medientaste setzt userPaused nicht, daher beides.)
-        let fileFresh = now.timeIntervalSince(written) < 1.5
-        var playing = fileFresh && bool(d["userPaused"]) != true
-        var position = playing ? elapsed + now.timeIntervalSince(written) : elapsed
+        // Beim Abspielen schreibt eSound die Datei jede Sekunde. Pausieren in eSound schreibt sofort
+        // userPaused: true – aber Fortsetzen per Medientaste setzt es nicht zurück. Das Feld gilt deshalb
+        // nur, solange danach nichts mehr geschrieben wird. Pausieren per Taste merkt man nur daran,
+        // dass die Schreibvorgänge ausbleiben.
+        let age = now.timeIntervalSince(written)
+        let userPaused = bool(d["userPaused"]) == true
+        if userPaused {
+            if esPausedWrite == nil { esPausedWrite = written }
+        } else {
+            esPausedWrite = nil
+        }
+        let flaggedPaused = userPaused && written <= esPausedWrite!.addingTimeInterval(0.5)
+        var playing = age < 1.3 && !flaggedPaused
+        // Höchstens 1,1 s über den letzten Schreibvorgang hinaus hochrechnen – so läuft die Zeit bei
+        // einer Pause per Taste nicht weit über die Pause-Stelle und springt danach nicht zurück
+        var position = flaggedPaused ? elapsed : elapsed + min(age, 1.1)
 
         if let o = esOverride {
             // Unser Wert gilt, bis eSound nach dem Klick mindestens einmal geschrieben hat (max. 3 s)
