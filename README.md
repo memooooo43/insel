@@ -13,7 +13,16 @@ Eine „Dynamic Island“ für die Notch des MacBooks – mit Musik-Player, Live
 - **Wetter** über [Open-Meteo](https://open-meteo.com) – kostenlos, ohne Account
 - **Liquid Glass** (macOS 26+), animiert mit SwiftUI und Core Animation, < 1 % CPU
 
-Fährt man mit der Maus auf die Notch, klappt die Insel auf. Rechtsklick öffnet die Einstellungen (Stadt fürs Wetter, Ablage leeren, Beenden).
+Fährt man mit der Maus auf die Notch, klappt die Insel auf.
+
+## Einstellungen
+
+Über das Zahnrad in der ausgeklappten Insel oder per Rechtsklick → *Einstellungen …* – alles wirkt sofort, ohne Neustart:
+
+- **Allgemein:** beim Login starten, Öffnen-/Schließen-Verzögerung, Ablage, Akkuanzeige, Lade- und AirPods-Hinweise
+- **Musik:** Quellen (Apple Music, Spotify, eSound), Equalizer, Lyrics und Lyrics-Versatz
+- **Aussehen:** Liquid Glass und Abdunkelung, Akzentfarbe (aus dem Cover oder eigene), Dicke des Fortschrittsbalkens
+- **Wetter:** an/aus, Stadt oder aktueller Standort, °C/°F
 
 ## Entstehung
 

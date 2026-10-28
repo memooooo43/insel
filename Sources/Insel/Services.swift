@@ -46,7 +46,9 @@ final class MusicModel: ObservableObject {
     @Published var playing = false
     @Published var duration: Double = 0
     @Published var artwork: NSImage?
-    @Published var accent = Color(red: 0.55, green: 0.85, blue: 0.75)
+    /// Farbe aus dem Cover; `accent` nimmt je nach Einstellung diese oder die eigene Farbe.
+    @Published var coverAccent = Color(red: 0.55, green: 0.85, blue: 0.75)
+    var accent: Color { Settings.shared.accentFromCover ? coverAccent : Settings.shared.fixedAccent }
     @Published var lyrics = LyricsState.none
 
     private var position: Double = 0
@@ -64,14 +66,14 @@ final class MusicModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
     }
 
-    var isActive: Bool { player != nil && playing }
+    var isActive: Bool { player != nil && playing && Settings.shared.showMusic }
 
     /// Beispieldaten für `--snapshot`.
     func loadDemo() {
         timer?.invalidate()
         player = .music; title = "Neon Nights"; artist = "Demo Artist"; playing = true
         duration = 214; position = 83; polledAt = Date()
-        accent = Color(red: 0.55, green: 0.9, blue: 0.6)
+        coverAccent = Color(red: 0.55, green: 0.9, blue: 0.6)
         lyrics = .loaded([LyricLine(time: 80, text: "Driving through the city lights tonight"), LyricLine(time: 90, text: "Nothing else but you and I")])
     }
 
@@ -83,7 +85,7 @@ final class MusicModel: ObservableObject {
 
     func currentLyric(at date: Date) -> (current: String, next: String)? {
         guard case .loaded(let lines) = lyrics, !lines.isEmpty else { return nil }
-        let pos = position(at: date) + 0.3
+        let pos = position(at: date) + 0.3 + Settings.shared.lyricsOffset
         guard let i = lines.lastIndex(where: { $0.time <= pos }) else { return ("", lines[0].text) }
         return (lines[i].text, i + 1 < lines.count ? lines[i + 1].text : "")
     }
@@ -147,7 +149,9 @@ final class MusicModel: ObservableObject {
 
     private func poll() {
         // Nur abfragen, was schon läuft – sonst würde AppleScript die App starten.
-        let states = [Player.esound, .spotify, .music]
+        let s = Settings.shared
+        let enabled: [Player] = (s.sourceESound ? [.esound] : []) + (s.sourceSpotify ? [.spotify] : []) + (s.sourceAppleMusic ? [.music] : [])
+        let states = enabled
             .filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleID).isEmpty }
             .compactMap { p in state(of: p).map { (p, $0) } }
         guard let (p, s) = states.first(where: { $0.1.playing }) ?? states.first else {
@@ -221,7 +225,7 @@ final class MusicModel: ObservableObject {
 
     private func setArtwork(_ image: NSImage) {
         artwork = image
-        if let c = Self.accentColor(of: image) { accent = c }
+        if let c = Self.accentColor(of: image) { coverAccent = c }
     }
 
     // MARK: eSound

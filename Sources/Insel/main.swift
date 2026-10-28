@@ -33,11 +33,17 @@ final class IslandUI: ObservableObject {
         for model in [music.objectWillChange, tray.objectWillChange] as [ObservableObjectPublisher] {
             bag.append(model.sink { [weak self] in self?.objectWillChange.send() })
         }
+        // Einstellungen ändern Größe, Farben und Inhalte – alle Ansichten neu zeichnen
+        bag.append(Settings.shared.objectWillChange.sink { [weak self] in
+            self?.objectWillChange.send()
+            self?.music.objectWillChange.send()
+        })
         battery.onPluggedIn = { [weak self] in
-            guard let self else { return }
+            guard let self, Settings.shared.notifyCharging else { return }
             self.show(IslandEvent(icon: "bolt.fill", value: "\(self.battery.level) %", color: .green))
         }
         airpods.onConnect = { [weak self] d in
+            guard Settings.shared.notifyAirPods else { return }
             self?.show(IslandEvent(icon: d.icon, value: d.lowest.map { "\($0) %" } ?? "", color: .white))
         }
     }
@@ -59,22 +65,6 @@ final class IslandUI: ObservableObject {
             if self?.event?.id == e.id { self?.event = nil }
         }
     }
-
-    func askCity() {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "Stadt fürs Wetter"
-        alert.informativeText = "Leer lassen, um den aktuellen Standort zu nutzen."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.stringValue = weather.city ?? ""
-        alert.accessoryView = field
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Abbrechen")
-        if alert.runModal() == .alertFirstButtonReturn {
-            let city = field.stringValue.trimmingCharacters(in: .whitespaces)
-            weather.setCity(city.isEmpty ? nil : city)
-        }
-    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -88,6 +78,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let panelSize = CGSize(width: 720, height: 250)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < CommandLine.arguments.count {
+            snapshotSettings(to: CommandLine.arguments[i + 1])
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
             snapshot(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
             return
@@ -155,6 +149,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `Insel --snapshot-settings <ordner>`: die vier Tabs des Einstellungsfensters als Bilder.
+    private func snapshotSettings(to folder: String) {
+        demoMode = true
+        var windows: [NSWindow] = []
+        for i in 0..<4 {
+            let view = NSHostingView(rootView: SettingsView(ui: ui, settings: .shared, tab: SettingsTab(i)))
+            let w = NSWindow(contentRect: NSRect(x: -5000, y: -5000, width: 500, height: 440), styleMask: .titled, backing: .buffered, defer: false)
+            w.contentView = view
+            w.orderFrontRegardless()
+            windows.append(w)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            for (i, w) in windows.enumerated() {
+                guard let view = w.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/einstellungen-\(i).png"))
+            }
+            exit(0)
+        }
+    }
+
     private var screen: NSScreen {
         NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.screens.first!
     }
@@ -196,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if dragChangeCount == nil {
                 dragChangeCount = pasteboard.changeCount
             } else if pasteboard.changeCount != dragChangeCount, dropZone.contains(p),
-                      pasteboard.types?.contains(.fileURL) == true {
+                      Settings.shared.showTray, pasteboard.types?.contains(.fileURL) == true {
                 draggingFiles = true
                 ui.tab = .tray
             }
@@ -213,7 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) { self?.ui.expanded = true }
             }
             expandWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + (draggingFiles ? 0 : 0.1), execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (draggingFiles ? 0 : Settings.shared.openDelay), execute: work)
         } else {
             expandWork?.cancel(); expandWork = nil
             guard ui.expanded, collapseWork == nil, !draggingFiles else { return }
@@ -222,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) { self?.ui.expanded = false }
             }
             collapseWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Settings.shared.closeDelay, execute: work)
         }
     }
 }

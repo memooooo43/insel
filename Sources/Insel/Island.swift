@@ -7,6 +7,9 @@ private let spring = Animation.spring(response: 0.42, dampingFraction: 0.8)
 /// Liquid Glass lässt sich nicht in Vorschaubilder rendern – `--snapshot` schaltet es ab.
 var glassEnabled = true
 
+/// Glas nur, wenn es renderbar ist und in den Einstellungen eingeschaltet.
+var useGlass: Bool { glassEnabled && Settings.shared.liquidGlass }
+
 /// Notch-Form: oben zwei kleine nach außen gebogene Ausläufer, unten runde Ecken.
 struct NotchShape: Shape {
     var flare: CGFloat
@@ -65,12 +68,13 @@ struct IslandView: View {
         .frame(width: size.width, height: size.height)
         .contentShape(NotchShape(flare: flare, radius: 11))
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard Settings.shared.showTray else { return false }
             ui.tray.add(providers)
             ui.tab = .tray
             return true
         }
         .contextMenu {
-            Button("Stadt fürs Wetter festlegen …") { ui.askCity() }
+            Button("Einstellungen …") { SettingsWindow.show(ui: ui) }
             Button("Ablage leeren") { ui.tray.clear() }
             Divider()
             Button("Insel beenden") { NSApp.terminate(nil) }
@@ -92,19 +96,21 @@ struct IslandBackground: View {
     var body: some View {
         let shape = NotchShape(flare: flare, radius: expanded ? 32 : 11)
         let notchEnd = min(notchHeight / max(height, 1), 0.9)
+        let darkness = Settings.shared.glassDarkness
         ZStack {
-            if glassEnabled, #available(macOS 26.0, *) {
+            if useGlass, #available(macOS 26.0, *) {
                 Color.clear
-                    .glassEffect(.regular.tint(.black.opacity(0.3)), in: shape)
+                    .glassEffect(.regular.tint(.black.opacity(darkness)), in: shape)
                     .opacity(expanded ? 1 : 0)
             } else if expanded {
-                shape.fill(Color(white: 0.16))
+                // Ohne Glas: in der Vorschau grau, wenn abgeschaltet schwarz
+                shape.fill(glassEnabled ? Color.black : Color(white: 0.16))
             }
             shape.fill(LinearGradient(stops: [
                 .init(color: .black, location: 0),
                 .init(color: .black, location: notchEnd),
-                .init(color: .black.opacity(expanded ? 0.55 : 1), location: min(notchEnd + 0.3, 1)),
-                .init(color: .black.opacity(expanded ? 0.4 : 1), location: 1),
+                .init(color: .black.opacity(expanded ? min(darkness + 0.25, 1) : 1), location: min(notchEnd + 0.3, 1)),
+                .init(color: .black.opacity(expanded ? min(darkness + 0.1, 1) : 1), location: 1),
             ], startPoint: .top, endPoint: .bottom))
             // Feine Lichtkante unten, wie bei Glas
             shape.stroke(LinearGradient(colors: [.clear, .clear, .white.opacity(expanded ? 0.22 : 0)],
@@ -142,7 +148,9 @@ struct CompactMusic: View {
         CompactSides(notch: notch, flare: flare) {
             Artwork(image: music.artwork, size: 22, corner: 6)
         } right: {
-            Equalizer(color: music.accent, playing: music.playing)
+            if Settings.shared.showEqualizer {
+                Equalizer(color: music.accent, playing: music.playing)
+            }
         }
     }
 }
@@ -241,14 +249,26 @@ struct ExpandedView: View {
     @ObservedObject var ui: IslandUI
     @ObservedObject var music: MusicModel
     @ObservedObject var tray: TrayModel
+    @ObservedObject var settings = Settings.shared
+
+    /// Gewählter Tab – fällt auf den anderen zurück, wenn einer ausgeschaltet ist.
+    private var tab: IslandUI.Tab? {
+        let available = [settings.showMusic ? IslandUI.Tab.music : nil, settings.showTray ? .tray : nil].compactMap { $0 }
+        return available.contains(ui.tab) ? ui.tab : available.first
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             // Kopfzeile links/rechts neben der Notch
             HStack(spacing: 0) {
                 HStack(spacing: 4) {
-                    TabButton(symbol: "music.note", active: ui.tab == .music) { ui.tab = .music }
-                    TabButton(symbol: tray.files.isEmpty ? "tray" : "tray.full", active: ui.tab == .tray) { ui.tab = .tray }
+                    if settings.showMusic {
+                        TabButton(symbol: "music.note", active: tab == .music) { ui.tab = .music }
+                    }
+                    if settings.showTray {
+                        TabButton(symbol: tray.files.isEmpty ? "tray" : "tray.full", active: tab == .tray) { ui.tab = .tray }
+                    }
+                    TabButton(symbol: "gearshape", active: false) { SettingsWindow.show(ui: ui) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Color.clear.frame(width: ui.notch.width)
@@ -261,9 +281,13 @@ struct ExpandedView: View {
             .frame(height: max(ui.notch.height, 30))
 
             Group {
-                switch ui.tab {
+                switch tab {
                 case .music: MusicPanel(music: music)
                 case .tray: TrayPanel(tray: tray)
+                case nil:
+                    Text("Musik und Ablage sind in den Einstellungen ausgeschaltet.")
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .frame(maxHeight: .infinity)
@@ -277,7 +301,7 @@ struct ExpandedView: View {
 
 struct GlassCapsule: View {
     var body: some View {
-        if glassEnabled, #available(macOS 26.0, *) {
+        if useGlass, #available(macOS 26.0, *) {
             Color.clear.glassEffect(.regular.tint(.white.opacity(0.08)), in: Capsule())
         } else {
             Capsule().fill(.white.opacity(0.16))
@@ -290,7 +314,7 @@ struct GlassCircle: View {
 
     var body: some View {
         Group {
-            if glassEnabled, #available(macOS 26.0, *) {
+            if useGlass, #available(macOS 26.0, *) {
                 Color.clear.glassEffect(.regular.tint(.white.opacity(0.06)).interactive(), in: Circle())
             } else {
                 Circle().fill(.white.opacity(0.12))
@@ -320,9 +344,11 @@ struct TabButton: View {
 
 struct WeatherLabel: View {
     @ObservedObject var weather: WeatherModel
+    @ObservedObject var settings = Settings.shared
 
     var body: some View {
-        if let t = weather.temperature {
+        if settings.showWeather, let c = weather.temperature {
+            let t = settings.fahrenheit ? Int((Double(c) * 9 / 5 + 32).rounded()) : c
             HStack(spacing: 4) {
                 Image(systemName: weather.symbol).symbolRenderingMode(.multicolor).font(.system(size: 12))
                 Text("\(t)°").font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -334,9 +360,10 @@ struct WeatherLabel: View {
 
 struct BatteryLabel: View {
     @ObservedObject var battery: BatteryModel
+    @ObservedObject var settings = Settings.shared
 
     var body: some View {
-        if battery.hasBattery {
+        if settings.showBattery, battery.hasBattery {
             HStack(spacing: 4) {
                 Text("\(battery.level) %").font(.system(size: 12, weight: .semibold, design: .rounded))
                 Image(systemName: battery.symbol).font(.system(size: 14)).foregroundStyle(battery.color)
@@ -380,7 +407,9 @@ struct MusicPanel: View {
                         }
                     }
                     Progress(music: music, position: music.position(at: ctx.date))
-                    Lyrics(music: music, date: ctx.date)
+                    if Settings.shared.showLyrics {
+                        Lyrics(music: music, date: ctx.date)
+                    }
                 }
             }
         }
@@ -418,7 +447,8 @@ struct Progress: View {
         let live = music.duration > 0 ? min(1, position / music.duration) : 0
         let fraction = scrub.dragFraction ?? live
         let active = scrub.hovering || scrub.dragFraction != nil
-        let thickness: CGFloat = active ? 11 : 7
+        let base = CGFloat(Settings.shared.barThickness)
+        let thickness: CGFloat = active ? base + 4 : base
         HStack(spacing: 10) {
             Text(Self.time(fraction * music.duration)).frame(width: 34, alignment: .leading)
             GeometryReader { geo in
